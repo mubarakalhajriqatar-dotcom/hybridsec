@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HybridSec Dashboard</title>
+  <meta name="description" content="HybridSec: hybrid cybersecurity tool workflow orchestrator (Nmap, WhatWeb, Nikto) with AI planning.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b1220'/%3E%3Cpath d='M16 5l9 3.5v7.2c0 5.6-3.8 9.6-9 11.3-5.2-1.7-9-5.7-9-11.3V8.5L16 5z' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M11.5 16.2l3 3 6-6.5' fill='none' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!--
+    Page structure
+      .app-shell           two-column grid: sidebar (navigation) + main (one <section class="view"> per screen)
+      section.view         static skeleton of a screen; app.js shows one at a time (hash routing) and fills the
+                           containers that carry an id (#health-body, #runs-table, #run-detail, ...) with data
+      shared components    toast stack and confirm dialog at the end of <body>, used by every view
+    There are no <template> elements: dynamic markup is built as strings in app.js with esc() escaping.
+  -->
+  <div class="app-shell">
+
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="28" height="28">
+            <path d="M16 5l9 3.5v7.2c0 5.6-3.8 9.6-9 11.3-5.2-1.7-9-5.7-9-11.3V8.5L16 5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M11.5 16.2l3 3 6-6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-name">HybridSec</span>
+          <span class="brand-sub">Workflow Orchestrator</span>
+        </span>
+        <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+
+      <nav class="nav" id="nav" aria-label="Main navigation">
+        <a class="nav-item" href="#overview" data-route="overview">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+          <span>Overview</span>
+        </a>
+        <a class="nav-item" href="#planner" data-route="planner">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+          <span>AI Planner</span>
+        </a>
+        <a class="nav-item" href="#new-run" data-route="new-run">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>
+          <span>New Run</span>
+        </a>
+        <a class="nav-item" href="#runs" data-route="runs">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          <span>Runs</span>
+        </a>
+        <a class="nav-item" href="#compare" data-route="compare">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v16M15 4v16"/><path d="M4 9l5-5 5 5M20 15l-5 5-5-5"/></svg>
+          <span>Compare</span>
+        </a>
+        <a class="nav-item" href="#tools" data-route="tools">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>
+          <span>Custom tools</span>
+        </a>
+        <a class="nav-item" href="#settings" data-route="settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          <span>Settings</span>
+        </a>
+        <a class="nav-item" href="#about" data-route="about">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>
+          <span>About / Help</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="health-mini" id="health-mini">
+          <span class="dot dot-muted" id="health-dot"></span>
+          <span id="health-mini-text">Connecting to API...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============================ MAIN ============================ -->
+    <main class="main" id="main">
+
+      <!-- View: Overview (#overview) - health card, tool cards, KPI tiles, recent runs. app.js section 4 -->
+      <section class="view" id="view-overview" data-view="overview" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Overview</h1>
+            <p class="muted">Service health, tool availability and recent activity.</p>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-ghost" type="button" id="overview-refresh">Refresh</button>
+            <a class="btn btn-primary" href="#new-run">New Run</a>
+          </div>
+        </header>
+
+        <div class="grid grid-2">
+          <div class="card" id="health-card">
+            <div class="card-head"><h2>Service health</h2><span class="pill pill-muted" id="health-status-pill">unknown</span></div>
+            <div class="card-body" id="health-body"><div class="loading-row"><span class="spinner"></span> Loading health...</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Key metrics</h2></div>
+            <div class="card-body">
+              <div class="kpi-grid" id="overview-kpis"></div>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Tools</h2>
+        <div class="grid grid-3" id="tool-cards"><div class="loading-row"><span class="spinner"></span> Loading tools...</div></div>
+        <p class="hint">Extra command-line tools are registered on the <a href="#tools">Custom tools</a> page.</p>
+
+        <div class="card">
+          <div class="card-head"><h2>Recent runs</h2><a class="link" href="#runs">View all</a></div>
+          <div class="card-body no-pad" id="recent-runs"></div>
+        </div>
+      </section>
+
+      <!-- View: AI Planner (#planner, #planner?plan=ID) - request form, saved plans, plan detail + refine. app.js section 5 -->
+      <section class="view" id="view-planner" data-view="planner" hidden>
+        <header class="view-header">
+          <div>
+            <h1>AI Planner</h1>
+            <p class="muted">Describe the objective and let the planner compose a hybrid workflow from the available tools.</p>
+          </div>
+        </header>
+
+        <div class="grid grid-planner">
+          <div class="card">
+            <div class="card-head"><h2>Plan request</h2></div>
+            <div class="card-body">
+              <form id="plan-form" autocomplete="off">
+                <fieldset class="field">
+                  <legend>Tools</legend>
+                  <div class="check-group" id="plan-tools"><span class="muted">Loading tools...</span></div>
+                </fieldset>
+                <div class="field">
+                  <label for="plan-objective">Objective</label>
+                  <textarea id="plan-objective" name="objective" rows="5" minlength="10" maxlength="2000" required>Create a hybrid cybersecurity tool that uses Nmap to discover open ports and WhatWeb to identify technologies running on discovered web services.</textarea>
+                </div>
+                <div class="field">
+                  <label for="plan-target-hint">Target hint <span class="muted">(optional)</span></label>
+                  <input id="plan-target-hint" name="target_hint" type="text" placeholder="e.g. scanme.nmap.org or 10.0.0.0/24">
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary" type="submit" id="plan-submit">Generate plan</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Saved plans</h2><button class="btn btn-ghost btn-sm" type="button" id="plans-refresh">Refresh</button></div>
+            <div class="card-body no-pad" id="saved-plans"></div>
+          </div>
+        </div>
+
+        <div id="plan-result"></div>
+      </section>
+
+      <!-- View: New Run (#new-run, #new-run?plan_id=ID&tools=a,b) - run form with optional plan attachment. app.js section 6 -->
+      <section class="view" id="view-new-run" data-view="new-run" hidden>
+        <header class="view-header">
+          <div>
+            <h1>New Run</h1>
+            <p class="muted">Execute the hybrid workflow against an authorized target.</p>
+          </div>
+        </header>
+
+        <div class="grid grid-run">
+          <div class="card">
+            <div class="card-head"><h2>Run configuration</h2></div>
+            <div class="card-body">
+              <form id="run-form" autocomplete="off">
+                <div class="field">
+                  <label for="run-target">Target</label>
+                  <input id="run-target" name="target" type="text" required placeholder="hostname, IP address or CIDR">
+                  <div class="hint" id="run-scope-hint"></div>
+                </div>
+                <div class="field">
+                  <label for="run-label">Label <span class="muted">(optional)</span></label>
+                  <input id="run-label" name="label" type="text" maxlength="120" placeholder="e.g. Lab web server baseline">
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="run-timeout">Timeout (seconds)</label>
+                    <input id="run-timeout" name="timeout_seconds" type="number" min="10" step="1" placeholder="server default">
+                  </div>
+                  <div class="field">
+                    <label for="run-top-ports">Top ports</label>
+                    <input id="run-top-ports" name="top_ports" type="number" min="1" step="1" placeholder="100">
+                  </div>
+                </div>
+                <div class="hint" id="run-limits-hint" style="margin:-8px 0 16px"></div>
+                <fieldset class="field">
+                  <legend>Tools <span class="muted">(executed in order)</span></legend>
+                  <div class="hint" style="margin-bottom:8px">Tick the tools to run. The drop-down under a ticked tool chooses its profile: which of the tool's features the run uses. Custom tools (registered on the <a href="#tools">Custom tools</a> page) run after the built-in tools and need at least one of them; they have no profile, cannot be added to a run that follows a plan, and together take part of the time budget from the built-in tools, so raise the timeout when you add them. They only appear on the machine running HybridSec.</div>
+                  <div class="tool-rows" id="run-tools"><span class="muted">Loading tools...</span></div>
+                </fieldset>
+                <div class="field" id="run-plan-field" hidden>
+                  <span class="field-label">Plan</span>
+                  <div class="chip-row">
+                    <span class="chip chip-accent mono" id="run-plan-chip"></span>
+                    <button class="btn btn-ghost btn-sm" type="button" id="run-plan-clear" aria-label="Clear the attached plan">Clear</button>
+                  </div>
+                  <div class="hint" id="run-plan-tools"></div>
+                </div>
+                <div class="field">
+                  <label class="switch">
+                    <input type="checkbox" id="run-simulate" name="simulate">
+                    <span class="switch-track"></span>
+                    <span class="switch-label">Simulation mode</span>
+                  </label>
+                  <div class="hint">Generates realistic sample data for the selected tools without sending any network traffic. Useful for demos or when the tools are not installed.</div>
+                  <div class="hint hint-warn" id="run-simulate-suggest" hidden></div>
+                </div>
+                <div class="field">
+                  <label class="checkbox">
+                    <input type="checkbox" id="run-authorized" name="authorized" required>
+                    <span>I own this target or have written permission to test it</span>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary" type="submit" id="run-submit">Execute run</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Workflow</h2></div>
+            <div class="card-body">
+              <ol class="flow">
+                <li><span class="flow-stage">Discovery</span><strong>Nmap</strong><span class="muted">Scan of the top N TCP ports: service/version detection, a quick port list, default scripts or polite timing.</span></li>
+                <li><span class="flow-stage">Fingerprinting</span><strong>WhatWeb</strong><span class="muted">Identifies web technologies on every open HTTP/HTTPS service, at the stealthy, aggressive or heavy level.</span></li>
+                <li><span class="flow-stage">Assessment</span><strong>Nikto</strong><span class="muted">Optional web server checks: all of them, or only files, software or injection tests.</span></li>
+                <li><span class="flow-stage">Custom</span><strong>Your tools</strong><span class="muted">Run last, once on the target or once per web URL.</span></li>
+                <li><span class="flow-stage">Report</span><strong>Correlation</strong><span class="muted">Results are merged, scored and exported.</span></li>
+              </ol>
+              <div class="notice notice-warn">
+                Only scan systems you own or are explicitly authorized to test. Unauthorized scanning may be illegal.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Runs (#runs) - table of all runs, delete, select two to compare. app.js section 7 -->
+      <section class="view" id="view-runs" data-view="runs" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Runs</h1>
+            <p class="muted">Recorded workflow executions, newest first.</p>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-ghost" type="button" id="runs-refresh">Refresh</button>
+            <button class="btn btn-secondary" type="button" id="runs-compare" disabled>Compare selected</button>
+            <a class="btn btn-primary" href="#new-run">New Run</a>
+          </div>
+        </header>
+        <div class="card">
+          <div class="card-body no-pad" id="runs-table"></div>
+        </div>
+      </section>
+
+      <!-- View: Run detail (#run/<id>) - fully rendered by app.js section 8 into #run-detail (header, tabs, live polling) -->
+      <section class="view" id="view-run" data-view="run" hidden>
+        <div id="run-detail"></div>
+      </section>
+
+      <!-- View: Compare (#compare?base=ID&other=ID) - diff of two runs. app.js section 9 -->
+      <section class="view" id="view-compare" data-view="compare" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Compare runs</h1>
+            <p class="muted">Diff two runs to see what changed between scans.</p>
+          </div>
+        </header>
+        <div class="card">
+          <div class="card-body">
+            <form id="compare-form" class="compare-form">
+              <div class="field">
+                <label for="compare-base">Base run</label>
+                <select id="compare-base"></select>
+              </div>
+              <div class="field">
+                <label for="compare-other">Other run</label>
+                <select id="compare-other"></select>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Compare</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div id="compare-result"></div>
+      </section>
+
+      <!-- View: Settings (#settings) - AI planner keys/models and scanning limits written to .env. app.js section 10 -->
+      <section class="view" id="view-settings" data-view="settings" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Settings</h1>
+            <p class="muted">Configure the AI planner and scanning limits. Changes are written to .env and apply immediately, no restart needed.</p>
+            <div class="settings-path" id="settings-env-path"></div>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-ghost" type="button" id="settings-refresh">Reload</button>
+          </div>
+        </header>
+
+        <div class="notice notice-info" id="settings-readonly-banner" style="margin:0 0 16px" hidden>Editing is disabled because HYBRIDSEC_ENV_FILE is empty.</div>
+        <div id="settings-error" hidden></div>
+        <div class="loading-row" id="settings-loading"><span class="spinner"></span> Loading settings...</div>
+
+        <div id="settings-content" hidden>
+          <div class="card">
+            <div class="card-head">
+              <h2>AI planner</h2>
+              <button class="btn btn-secondary btn-sm" type="button" id="settings-test">Test planner</button>
+            </div>
+            <div class="settings-status" id="settings-active"></div>
+            <div class="card-body">
+              <fieldset class="fields" id="settings-planner-fields">
+                <div class="field">
+                  <label for="settings-provider">Provider</label>
+                  <select id="settings-provider">
+                    <option value="auto">auto (recommended)</option>
+                    <option value="anthropic">anthropic</option>
+                    <option value="openai">openai</option>
+                    <option value="rules">rules (no AI, deterministic)</option>
+                  </select>
+                  <div class="hint">auto uses Anthropic when it has credentials (an API key, an ANTHROPIC_AUTH_TOKEN or an <code>ant auth login</code> profile), otherwise OpenAI with a key, otherwise the built-in rules engine.</div>
+                </div>
+
+                <div class="field">
+                  <div class="key-head">
+                    <label for="settings-anthropic-key">Anthropic API key</label>
+                    <span class="pill pill-muted" id="settings-anthropic-pill">Not set</span>
+                  </div>
+                  <div class="input-group">
+                    <input type="password" id="settings-anthropic-key" placeholder="Paste key, starts with sk-ant-" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>
+                    <button class="btn btn-ghost btn-icon eye-toggle" type="button" data-target="settings-anthropic-key" aria-label="Show key" aria-pressed="false" title="Show or hide the key">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                    <button class="btn btn-primary btn-sm" type="button" id="settings-anthropic-save">Save key</button>
+                    <button class="btn btn-ghost btn-sm" type="button" id="settings-anthropic-clear">Clear</button>
+                  </div>
+                  <div class="hint">Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a> (Settings &gt; API Keys)</div>
+                </div>
+                <div class="field">
+                  <label for="settings-anthropic-model">Anthropic model</label>
+                  <input type="text" id="settings-anthropic-model" placeholder="Model id" spellcheck="false">
+                </div>
+
+                <div class="field">
+                  <div class="key-head">
+                    <label for="settings-openai-key">OpenAI-compatible API key</label>
+                    <span class="pill pill-muted" id="settings-openai-pill">Not set</span>
+                  </div>
+                  <div class="input-group">
+                    <input type="password" id="settings-openai-key" placeholder="Paste key, starts with sk-" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>
+                    <button class="btn btn-ghost btn-icon eye-toggle" type="button" data-target="settings-openai-key" aria-label="Show key" aria-pressed="false" title="Show or hide the key">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                    <button class="btn btn-primary btn-sm" type="button" id="settings-openai-save">Save key</button>
+                    <button class="btn btn-ghost btn-sm" type="button" id="settings-openai-clear">Clear</button>
+                  </div>
+                  <div class="hint">Get a key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com/api-keys</a>. Any OpenAI-compatible endpoint works with a custom base URL.</div>
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="settings-openai-model">OpenAI model</label>
+                    <input type="text" id="settings-openai-model" placeholder="Model id" spellcheck="false">
+                  </div>
+                  <div class="field">
+                    <label for="settings-openai-base-url">Base URL</label>
+                    <input type="text" id="settings-openai-base-url" placeholder="https://api.openai.com/v1" spellcheck="false">
+                  </div>
+                </div>
+
+                <div class="form-actions">
+                  <button class="btn btn-primary" type="button" id="settings-save-planner">Save planner settings</button>
+                </div>
+              </fieldset>
+              <div id="settings-test-result"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Scanning limits</h2></div>
+            <div class="card-body">
+              <fieldset class="fields" id="settings-limits-fields">
+                <div class="field">
+                  <label for="settings-allowed-targets">Allowed targets <span class="muted">(one per line)</span></label>
+                  <textarea id="settings-allowed-targets" class="mono" rows="4" placeholder="scanme.nmap.org&#10;10.0.0.0/24&#10;*.lab.example.edu" spellcheck="false"></textarea>
+                  <div class="hint">Hosts, IPs, CIDRs or *.domain wildcards. Leave empty to allow any target the operator confirms as authorized.</div>
+                </div>
+                <div class="field">
+                  <label class="switch">
+                    <input type="checkbox" id="settings-allow-sim">
+                    <span class="switch-track"></span>
+                    <span class="switch-label">Allow simulation</span>
+                  </label>
+                  <div class="hint">Lets runs use simulation mode, which generates sample data without sending network traffic.</div>
+                </div>
+                <div class="field-row field-row-3">
+                  <div class="field">
+                    <label for="settings-max-timeout">Max timeout (seconds)</label>
+                    <input type="number" id="settings-max-timeout" min="10" max="86400" step="1">
+                  </div>
+                  <div class="field">
+                    <label for="settings-default-timeout">Default timeout (seconds)</label>
+                    <input type="number" id="settings-default-timeout" min="10" max="86400" step="1">
+                  </div>
+                  <div class="field">
+                    <label for="settings-max-top-ports">Max top ports</label>
+                    <input type="number" id="settings-max-top-ports" min="1" max="65535" step="1">
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary" type="button" id="settings-save-limits">Save scanning limits</button>
+                </div>
+              </fieldset>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Custom tools (#tools) - register, list and delete custom tools. app.js section 11 -->
+      <section class="view" id="view-tools" data-view="tools" hidden>
+        <header class="view-header">
+          <div>
+            <h1>Custom tools</h1>
+            <p class="muted">Extra command-line tools that run after Nmap, WhatWeb and Nikto, in runs started on this machine.</p>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-ghost" type="button" id="tools-refresh">Refresh</button>
+          </div>
+        </header>
+
+        <div id="tools-error" hidden></div>
+        <div id="tools-content">
+          <div class="grid grid-run">
+            <div class="card">
+              <div class="card-head"><h2>Add a tool</h2></div>
+              <div class="card-body">
+                <form id="tool-form" autocomplete="off">
+                  <fieldset class="fields" id="tool-form-fields">
+                    <div class="field">
+                      <label for="tool-name">Name</label>
+                      <input id="tool-name" name="name" type="text" class="mono" required maxlength="32" spellcheck="false" autocapitalize="off" placeholder="e.g. hdrcheck" aria-describedby="tool-name-hint">
+                      <div class="hint" id="tool-name-hint">Lower-case letters, digits, - and _, starting with a letter; upper case is lowered for you.</div>
+                    </div>
+                    <div class="field">
+                      <label for="tool-program">Program</label>
+                      <input id="tool-program" name="program" type="text" class="mono" required maxlength="260" spellcheck="false" autocapitalize="off" list="tool-programs" placeholder="e.g. curl or /usr/bin/curl" aria-describedby="tool-program-hint">
+                      <datalist id="tool-programs"></datalist>
+                      <div class="hint" id="tool-program-hint">Known shells, interpreters and launchers, script files, attack tools and the built-in scanners are always refused; the allow-list in .env decides the rest.</div>
+                    </div>
+                    <div class="field">
+                      <label for="tool-args">Arguments</label>
+                      <input id="tool-args" name="args" type="text" class="mono" required spellcheck="false" autocapitalize="off" placeholder="e.g. -sI --max-time 20 {url}" aria-describedby="tool-args-hint">
+                      <div class="hint" id="tool-args-hint">Separate arguments with spaces; each piece goes to the program as one argument, with no quotes and no shell. Use {target} for the run's target and, for a per-URL tool, {url}.</div>
+                      <div id="tool-preview" aria-live="polite"></div>
+                    </div>
+                    <fieldset class="field">
+                      <legend>How it runs</legend>
+                      <div class="check-group">
+                        <label class="check-item"><input type="radio" name="tool-scope" value="target" checked><span>Once on the target</span></label>
+                        <label class="check-item"><input type="radio" name="tool-scope" value="url"><span>Once per web URL found by the earlier stages</span></label>
+                      </div>
+                    </fieldset>
+                    <div class="field">
+                      <label for="tool-timeout">Time limit per call (seconds)</label>
+                      <input id="tool-timeout" name="timeout_seconds" type="number" min="10" step="1" value="60" required aria-describedby="tool-timeout-hint">
+                      <div class="hint" id="tool-timeout-hint">The run's time budget is shared by all its tools, so a call may be stopped sooner.</div>
+                    </div>
+                    <div class="field">
+                      <label for="tool-description">Description <span class="muted">(optional)</span></label>
+                      <textarea id="tool-description" name="description" rows="2" maxlength="300"></textarea>
+                    </div>
+                    <div class="form-actions">
+                      <button class="btn btn-primary" type="submit" id="tool-submit">Add tool</button>
+                    </div>
+                  </fieldset>
+                </form>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><h2>How custom tools run</h2></div>
+              <div class="card-body">
+                <ul class="list-plain">
+                  <li>They are added, listed and run only from the machine running HybridSec.</li>
+                  <li>Only <code>{target}</code> and <code>{url}</code> are filled in, from the checked, authorized target. Fixed addresses, host names, <code>@server</code> forms, proxies, option files and network shares in the arguments are refused. Other options you type (for example one that follows redirects) are trusted and could still lead the tool to another host.</li>
+                  <li>Arguments go to the program as a list, never through a shell.</li>
+                  <li>Each call is stopped at its time limit, once it prints more than 50,000 characters on standard output or on standard error (5,000 characters of standard error are kept), and inside the run's deadline. A run keeps at most 200,000 characters of custom-tool output in all.</li>
+                  <li>Output is kept as text and exported, not parsed into findings or scored, and simulation mode works without the program installed.</li>
+                </ul>
+                <div class="notice notice-warn">Do not put passwords or API keys in arguments: commands are stored with every run and appear in reports. Arguments that look like secrets are refused.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Registered tools</h2></div>
+            <div class="card-body no-pad" id="custom-tools-list"><div class="loading-row"><span class="spinner"></span> Loading custom tools...</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: About / Help (#about) - static content only, no script involvement -->
+      <section class="view" id="view-about" data-view="about" hidden>
+        <header class="view-header">
+          <div>
+            <h1>About / Help</h1>
+            <p class="muted">What HybridSec does, how to install the tools, and how to configure it.</p>
+          </div>
+          <img class="mascot" src="/static/mascot.svg" width="104" height="120" alt="HybridSec mascot: a penguin wearing a cyan visor and a shield badge">
+        </header>
+
+        <div class="notice notice-danger notice-large">
+          <strong>Legal notice.</strong> Port scanning and web fingerprinting generate network traffic that may be considered intrusive. Only scan systems you own or are explicitly authorized to test in writing. You are solely responsible for complying with applicable laws and your organization's policies. Use simulation mode for demonstrations.
+        </div>
+
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-head"><h2>The hybrid workflow</h2></div>
+            <div class="card-body prose">
+              <p>HybridSec chains several open-source security tools into one pipeline and uses an AI planner to describe, justify and sequence the steps:</p>
+              <ol>
+                <li><strong>Nmap</strong> scans the top N TCP ports of the target, by default with service and version detection; the chosen profile can drop the version probes, add Nmap's default scripts or use polite timing.</li>
+                <li>Open ports that look like web services (HTTP/HTTPS, common web ports) are converted into URLs.</li>
+                <li><strong>WhatWeb</strong> fingerprints each URL to identify servers, frameworks, CMSs and libraries.</li>
+                <li><strong>Nikto</strong> (optional) checks each web server for known misconfigurations and outdated software.</li>
+                <li><strong>Custom tools</strong> (optional, registered on the <a href="#tools">Custom tools</a> page from the machine running HybridSec) run last, once on the target or once per web URL; their output is kept as text, not parsed into findings or scored.</li>
+                <li>Results are correlated into a single report with a 0-100 risk score, highlights and downloadable JSON, CSV, HTML and Markdown exports.</li>
+              </ol>
+              <p>The <strong>AI Planner</strong> turns a plain-language objective into a structured workflow (steps, inputs, outputs, command templates, safety controls). Plans can be saved and executed directly from the dashboard.</p>
+              <p><strong>Simulation mode</strong> produces realistic sample data without any network traffic so the workflow can be demonstrated safely.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Configuration (.env)</h2></div>
+            <div class="card-body prose">
+              <p>The backend reads its settings from a <code>.env</code> file in the project root:</p>
+              <pre class="code-block"><code>HYBRIDSEC_AI_PROVIDER=auto        # auto | anthropic | openai | rules
+ANTHROPIC_API_KEY=sk-ant-...      # used when provider is auto/anthropic
+ANTHROPIC_MODEL=claude-opus-5-5
+OPENAI_API_KEY=sk-...             # any OpenAI-compatible endpoint
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+HYBRIDSEC_AI_TIMEOUT=120          # seconds per connect, read or write of a planner request (not the whole request)
+HYBRIDSEC_HOST=127.0.0.1          # address the launch scripts bind
+HYBRIDSEC_PORT=8000
+HYBRIDSEC_ALLOWED_TARGETS=        # comma-separated hosts/CIDRs/*.domain; empty = any authorized target
+HYBRIDSEC_ALLOWED_HOSTS=          # extra Host header names; localhost, 127.0.0.1 and ::1 are always accepted
+HYBRIDSEC_CUSTOM_PROGRAMS=        # programs the Custom tools page accepts; empty = curl, dig, host, nslookup, whois, sslscan, sslyze, traceroute, tracert
+HYBRIDSEC_ALLOW_SIMULATION=true   # allow simulated runs
+HYBRIDSEC_MAX_TIMEOUT=900
+HYBRIDSEC_DEFAULT_TIMEOUT=180
+HYBRIDSEC_MAX_TOP_PORTS=1000
+HYBRIDSEC_MAX_CONCURRENT_RUNS=3   # runs that may execute at the same time
+HYBRIDSEC_DATA_DIR=./data</code></pre>
+              <p>Without Anthropic or OpenAI credentials the planner falls back to the built-in <code>rules</code> provider, which produces a deterministic plan.</p>
+              <p>The planner, scanning-limit and simulation values can also be changed from the <a href="#settings">Settings</a> page, which writes them to <code>.env</code> for you and applies them without a restart. <code>HYBRIDSEC_AI_TIMEOUT</code>, <code>HYBRIDSEC_HOST</code>, <code>HYBRIDSEC_PORT</code>, <code>HYBRIDSEC_ALLOWED_HOSTS</code>, <code>HYBRIDSEC_CUSTOM_PROGRAMS</code> and <code>HYBRIDSEC_DATA_DIR</code> are edited in <code>.env</code> only (the address, port and data folder take effect after a restart), and <code>HYBRIDSEC_MAX_CONCURRENT_RUNS</code> through <code>PUT /api/settings</code>.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Installing the tools</h2></div>
+          <div class="card-body">
+            <div class="grid grid-3">
+              <div class="install-col">
+                <h3>Ubuntu / Debian</h3>
+                <pre class="code-block"><code>sudo apt update
+sudo apt install -y nmap whatweb nikto</code></pre>
+                <p class="muted small">WhatWeb may not be in older repositories; see the Kali column for a git install.</p>
+              </div>
+              <div class="install-col">
+                <h3>Kali Linux</h3>
+                <pre class="code-block"><code>sudo apt update
+sudo apt install -y nmap whatweb nikto
+
+# WhatWeb from source (any distro)
+sudo apt install -y ruby ruby-dev git
+git clone https://github.com/urbanadventurer/WhatWeb
+cd WhatWeb &amp;&amp; sudo make install</code></pre>
+              </div>
+              <div class="install-col">
+                <h3>Windows</h3>
+                <pre class="code-block"><code># Nmap (installer or winget)
+winget install Insecure.Nmap
+
+# WhatWeb / Nikto need Ruby / Perl.
+# Easiest: run them in WSL (Ubuntu):
+wsl --install -d Ubuntu
+wsl sudo apt install -y nmap whatweb nikto</code></pre>
+                <p class="muted small">Alternatively use simulation mode on Windows hosts without the tools.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>API endpoints used by this dashboard</h2></div>
+          <div class="card-body no-pad table-wrap">
+            <table class="table">
+              <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+              <tbody>
+                <tr><td><code>GET</code></td><td><code>/api/health</code></td><td>Service status, AI provider, tool availability</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/tools</code></td><td>Tool metadata, versions, install hints and each tool's profiles</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/tools/custom</code></td><td>Registered custom tools, whether each can run here, and the allowed programs (loopback clients only)</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/tools/custom</code></td><td>Register a custom tool (loopback clients only)</td></tr>
+                <tr><td><code>DELETE</code></td><td><code>/api/tools/custom/{name}</code></td><td>Delete a custom tool; runs that used it keep their copy (loopback clients only)</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/ai/plan</code></td><td>Generate a workflow plan</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/ai/plans</code>, <code>/api/ai/plans/{id}</code></td><td>List and open saved plans</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/ai/plans/{id}/refine</code></td><td>Refine a saved plan into a linked revision</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/hybridizations/execute</code></td><td>Queue a run (custom tools may be named in <code>tools</code> by loopback clients only)</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/runs</code>, <code>/api/runs/{id}</code></td><td>List and inspect runs</td></tr>
+                <tr><td><code>DELETE</code></td><td><code>/api/runs/{id}</code></td><td>Delete a run</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/runs/{id}/report?format=</code></td><td>Export JSON / CSV / HTML / Markdown</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/compare?base=&amp;other=</code></td><td>Diff two runs</td></tr>
+                <tr><td><code>GET</code> / <code>PUT</code></td><td><code>/api/settings</code></td><td>Read and update the configuration (loopback clients only)</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/settings/test-planner</code></td><td>Send a short test request to the configured planner (loopback clients only)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Not found - shown for any unknown hash -->
+      <section class="view" id="view-notfound" data-view="notfound" hidden>
+        <div class="empty-state large">
+          <h2>Page not found</h2>
+          <p class="muted">The requested view does not exist.</p>
+          <a class="btn btn-primary" href="#overview">Back to overview</a>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Shared component: toast stack (toast() in app.js appends notifications here; errors use role=alert) -->
+  <div class="toast-stack" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Shared component: confirm dialog (confirmDialog() in app.js sets title/message/button and calls showModal) -->
+  <dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <form method="dialog">
+      <h3 id="confirm-title">Confirm</h3>
+      <p id="confirm-message" class="muted"></p>
+      <div class="form-actions">
+        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-danger" value="ok" type="submit" id="confirm-ok">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

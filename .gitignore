@@ -1,0 +1,24 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Local settings and data: never commit keys or scan results
+.env
+.env.*
+!.env.example
+data/
+
+# Editors and tools
+.vscode/
+.idea/
+.claude/
+
+# Office owner files, archives
+~$*
+*.zip

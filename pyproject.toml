@@ -1,0 +1,33 @@
+# Linting configuration for HybridSec. Run:  .venv\Scripts\python -m ruff check .
+# Formatting and style are deliberately conservative so the code stays easy to read and explain.
+[tool.ruff]
+target-version = "py310"      # the oldest Python the project supports (README: Python 3.10+)
+line-length = 120
+extend-exclude = [".venv", "data", "docs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle errors and warnings
+    "F",         # pyflakes: undefined names, unused imports and variables
+    "I",         # import ordering
+    "UP",        # modern Python syntax for the supported versions
+    "B",         # bugbear: likely bugs and design problems
+    "SIM",       # simplifications
+    "PL",        # pylint checks
+    "RUF",       # ruff-specific checks
+    "FURB",      # refurb modernisations
+    "PERF",      # performance anti-patterns
+]
+ignore = [
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917",  # branch/argument/statement counts: readable code first
+    "PLR2004",   # "magic numbers" are documented in place where they appear
+    "PLC0415",   # local imports are deliberate in scripts/preflight.py (it must start without the venv)
+    "PERF203",   # try/except inside small loops is clearer than restructuring them
+    "PERF403",   # a commented for-loop beats a dict comprehension when the condition needs explaining
+    "PLW0603",   # the scanner runner's shutdown flag is a deliberate module-level global
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004", "E501"]
+# The test environment (private .env, temp data dir) must be configured before `app` is imported.
+"tests/test_api.py" = ["E402"]
