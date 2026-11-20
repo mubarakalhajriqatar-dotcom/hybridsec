@@ -443,6 +443,7 @@ h3{margin:18px 0 6px;font-size:15px}
 table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e1e6ec;font-size:13px}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eef1f4;vertical-align:top;overflow-wrap:break-word}
 td.long{overflow-wrap:anywhere}
+td.long code{white-space:pre-wrap}
 th{background:#eef2f6}
 tr:nth-child(even) td{background:#fafbfc}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;text-transform:uppercase;

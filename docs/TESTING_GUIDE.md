@@ -33,6 +33,9 @@ Run both commands from the project folder and paste their last lines into your r
 .venv/bin/python scripts/preflight.py    # Windows: .venv\Scripts\python scripts\preflight.py -> expect "Ready to present"
 ```
 
+A few of the 655 tests skip themselves on some machines, for example one when Nmap is installed and two when
+Node.js is missing. The last line then reads "652 passed, 3 skipped" or similar. No test may fail.
+
 Optional lint check: install `requirements-dev.txt` into the virtual environment and run `.venv/bin/python -m ruff check .`
 (Windows: `.venv\Scripts\python -m ruff check .`); expect "All checks passed!".
 
@@ -78,14 +81,24 @@ Tick each box and note anything unexpected. "Simulation" means the Simulation sw
 - [ ] L-05 An address where nothing listens, for example `127.0.0.2` (bind the web server of L-02 to `127.0.0.1` only, because on Linux and Windows a server that listens on all addresses also answers on `127.0.0.2`): no open ports, or the port scan fails with a host timeout; in both cases WhatWeb and Nikto are skipped.
 - [ ] L-06 Target `nohost.invalid`: the Nmap stage fails with "could not resolve" and the run is marked failed.
 
-These six tests were run once each on 20 November 2026 by Claude Code, an AI coding tool, at the request of
-the project lead, in Kali Linux under WSL 2 on the development PC. The target of L-01 to L-04 was one small
-static website written for the test, served by `python3 -m http.server` bound to `127.0.0.1` only; the
-scans found one open port. The runs were started through the API, not from the dashboard; the AI planner
-took no part, and the tools ran with their default profiles. All six gave the expected outcome. No scanner
-came near the part of the time budget it was given, so stopping a scanner at its time limit, skipping URLs
-when time runs out and partial stages are still covered only by the automated tests.
-The records are kept in the project's own archive, which is not part of this repository.
+These six tests were first run once each on 20 November 2026 by Claude Code, an AI coding tool, at the
+request of the project lead, in Kali Linux under WSL 2 on the development PC. The target of L-01 to L-04 was
+one small static website written for the test, served by `python3 -m http.server` bound to `127.0.0.1` only;
+the scans found one open port. The runs were started through the API; the AI planner took no part, and the
+tools ran with their default profiles. All six gave the expected outcome.
+
+The same day the project lead asked for more testing, and Claude Code ran an extended series of 85 runs in
+the same laboratory: the six tests five more times each and once from the dashboard, an Apache site with
+HTTP, HTTPS and a second site, every tool profile, fourteen web services, and short time budgets with slow
+services that made each scanner reach its time limit. In ten paired runs HybridSec gave the same ports,
+technologies and findings as the three tools run directly by a script, with middle run times 0.1 s apart.
+The series found three weaknesses in how the program handled a scan that reaches a time limit. They were
+corrected the same day, one only in part, and the corrections were retested in 14 more runs. WhatWeb's
+heavy profile still needs minutes per URL and cannot finish in a run with all three tools, and Nikto then
+has no URL to scan.
+
+All of this ran on one PC, on the loopback interface, against targets built for the tests. The plans and
+records of these tests are kept in the project's own archive, which is not part of this repository.
 
 ## 4. How to report a bug
 

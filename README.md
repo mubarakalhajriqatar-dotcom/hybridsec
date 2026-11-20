@@ -36,7 +36,8 @@ Requirements: Python 3.10 or newer. Nmap, WhatWeb and Nikto are optional at inst
 dashboard shows which ones it found and offers a **simulation mode** so you can demonstrate the
 whole pipeline on a machine without them.
 
-Get the code with Git, or download it as a zip from the repository page:
+Get the code with Git, or download it as a zip from the repository page (the zip unpacks to a
+folder named `hybridsec-main`; use that name in the `cd` commands below):
 
 ```bash
 git clone https://github.com/mubarakalhajriqatar-dotcom/hybridsec.git
@@ -105,21 +106,28 @@ Restart the server after installing a tool; the Overview page re-detects them.
    document how the design evolved.
 3. **New Run**: enter a target, tick the authorization box, pick tools or a saved plan, choose a
    profile for each ticked tool from the drop-down under it (Nmap: service and version detection, a
-   quick port scan, default scripts or polite timing; WhatWeb: aggression level 1, 3 or 4; Nikto: all
-   checks or one family of them), set the time budget and top-ports count, optionally enable
-   simulation, start.
+   quick port scan, default scripts or polite timing; WhatWeb: aggression level 1, 3 or 4, where level 4
+   can take several minutes per URL; Nikto: all checks or one family of them), set the time budget and
+   top-ports count, optionally enable simulation, start.
 4. **Run detail**: live progress while stages execute, then Summary, Ports, Web Technologies,
    Vulnerabilities, Log and Raw JSON tabs. Download JSON, CSV, HTML or Markdown reports. A stage
    whose tool produced no usable output is marked failed. A stage that did not examine everything it
-   was given (Nmap stopped at its limit, a host timeout, URLs skipped, a probe stopped at its limit or
-   by the server's shutdown, a probe that could not start, a tool that produced nothing for a URL, or a
-   Nikto that stopped early on a URL, for example after too many errors) is marked *partial* with a
-   note saying what is missing. A run that completes with such a stage, or with a failed later stage,
+   was given (Nmap stopped at its limit, a host timeout, ports found only by a second scan without
+   version detection, URLs skipped, a probe stopped at its limit or by the server's shutdown, a probe
+   that could not start, a tool that produced nothing for a URL, or a Nikto that stopped early on a URL,
+   for example at its own time limit or after too many errors) is marked *partial* with a note saying
+   what is missing. A run that completes with such a stage, or with a failed later stage,
    carries a *partial* pill in the history, a notice in the reports and a warning in the comparison; a
    failed run exports its coverage as *failed*, and a CSV without any result row still holds one `run`
    row that says how the run ended. A URL that gave no HTTP response is recorded as unreachable, which
-   is a result. The dashboard and the reports show a risk score only for a completed run; a failed one
-   is shown as not scored.
+   is a result. When a host hits Nmap's host timeout, no open port is found at all and the Nmap profile does
+   version detection (every profile except the quick port scan), the ports are scanned once more without
+   `-sV` and `-sC` if at least 5 s of Nmap's share and of the run are left; ports found that way complete
+   the stage as partial, without products or versions. A WhatWeb probe at level 3 or 4 that is stopped at
+   its limit before WhatWeb has logged a response records nothing for its URL: the URL is not counted as
+   unreachable, Nikto does not scan it, and the note advises a larger budget, fewer tools or a lighter
+   profile. The dashboard and the reports show a risk score only for a completed run; a failed one is
+   shown as not scored.
 5. **Runs**: history table, delete, select two runs and **Compare** (ports added/removed/changed,
    technologies added/removed, findings added/removed, and the risk delta when both runs completed).
 6. **Custom tools**: register an extra command-line tool without changing code: a name, the program

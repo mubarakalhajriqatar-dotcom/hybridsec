@@ -210,11 +210,93 @@ def test_host_timeout_note_names_the_hosts_and_marks_the_stage_partial(monkeypat
 
 
 def test_scan_where_every_host_timed_out_fails_and_names_the_host(monkeypatch):
-    """No open port and every host given up on: the stage fails (not partial) and says which host."""
+    """No open port and every host given up on: the ports are scanned again without version detection when the
+    profile used it and time is left. The stage is completed and partial when that finds ports, and otherwise
+    fails (not partial) and says which host."""
     fake_nmap(monkeypatch, NMAP_HEAD + TIMED_OUT_HOST + "</nmaprun>")
     stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000005", target="10.10.20.9"))
     assert stage.status == "failed" and stage.partial is False
     assert stage.error.startswith("nmap gave up on 10.10.20.9 after 24s (host timeout) without finding an open port.")
+    # The default profile asked for version detection, so the ports were scanned once more without it (see
+    # _rescan_without_versions). Here the host timed out in that scan too, and the note says that it gave no
+    # answer, not that no port is open.
+    assert " A second scan without version detection did not finish either (its host timeout was " in stage.error
+    assert stage.error.endswith("s), so it gives no answer about the ports.")
+    assert len(stage.command.splitlines()) == 2 and "-sV" not in stage.command.splitlines()[1]
+
+    # One slow service kept version detection busy until the host timeout (live tests of 20 November 2026): the
+    # second scan lists the open ports without versions, and the stage is completed and partial, not failed.
+    calls: list[list[str]] = []
+    plain_ports = (HOST_WITH_PORTS.replace("10.10.20.5", "10.10.20.9")
+                   .replace(' product="OpenSSH" version="9.6p1"', "").replace(' product="nginx"', ""))
+
+    def second_scan_gives(body: str):
+        """A fake Nmap whose scan with -sV runs into the host timeout and whose scan without it returns `body`."""
+        def fake(command, timeout):
+            calls.append(command)
+            xml = NMAP_HEAD + (TIMED_OUT_HOST if "-sV" in command else body) + "</nmaprun>"
+            return CommandResult(command=command, exit_code=0, stdout=xml, stderr="", duration_seconds=0.1)
+        return fake
+
+    monkeypatch.setattr(hybrid, "run_command", second_scan_gives(plain_ports))
+    run = nmap_run("nmrev0000032", target="10.10.20.9")
+    context: dict = {}
+    stage = run_stage_handler(hybrid.stage_port_scan, run, context)
+    assert stage.status == "completed" and stage.partial is True and [p.port for p in run.ports] == [22, 80]
+    assert all(not p.product and not p.version for p in run.ports)
+    assert stage.error.startswith("nmap gave up on 10.10.20.9 after 24s (host timeout), so the ports were scanned "
+                                  "again without version detection: no product or version is shown")
+    assert stage.error.endswith("Increase the time budget or reduce top_ports.")
+    first, second = stage.command.splitlines()
+    assert "-sV" in first and "-sV" not in second and "-T4" in second
+    assert int(second.split("--host-timeout ")[1].split("s")[0]) < 24  # its own limit, from the time that is left
+    assert len(calls) == 2 and context["web_ports"] and summarize(run, context["hosts_up"]).partial is True
+
+    # The second scan keeps -6, and its own caveats join the note with the advice given once.
+    calls.clear()
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000036", target="2001:db8::9"))
+    assert stage.status == "completed" and len(calls) == 2
+    assert all(line.endswith(" -6 -oX - 2001:db8::9") for line in stage.command.splitlines())
+    monkeypatch.setattr(hybrid, "run_command", second_scan_gives(
+        plain_ports + TIMED_OUT_HOST.replace("10.10.20.9", "10.10.20.8")))
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000038", target="10.10.20.0/24"))
+    assert stage.status == "completed" and stage.partial is True
+    assert "host timeout, so nmap reported no ports for them: 10.10.20.8." in stage.error
+    assert stage.error.count("Increase the time budget or reduce top_ports.") == 1
+
+    # A second scan that finished and found nothing says so; one that could not start adds no sentence.
+    monkeypatch.setattr(hybrid, "run_command", second_scan_gives(""))
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000039", target="10.10.20.9"))
+    assert stage.status == "failed"
+    assert stage.error.endswith(" A second scan without version detection found no open port either.")
+
+    def second_cannot_start(command, timeout):
+        calls.append(command)
+        if "-sV" not in command:
+            raise FileNotFoundError(2, "No such file or directory", command[0])
+        return CommandResult(command=command, exit_code=0, stdout=NMAP_HEAD + TIMED_OUT_HOST + "</nmaprun>",
+                             stderr="", duration_seconds=0.1)
+
+    monkeypatch.setattr(hybrid, "run_command", second_cannot_start)
+    calls.clear()
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000037", target="10.10.20.9"))
+    assert stage.status == "failed" and len(calls) == 2 and "second scan" not in stage.error
+
+    # No second scan when the profile did no version detection, or when too little of the time is left.
+    def gave_up(command, timeout):
+        calls.append(command)
+        return CommandResult(command=command, exit_code=0, stdout=NMAP_HEAD + TIMED_OUT_HOST + "</nmaprun>",
+                             stderr="", duration_seconds=0.1)
+
+    monkeypatch.setattr(hybrid, "run_command", gave_up)
+    calls.clear()
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000033", target="10.10.20.9",
+                                                               profiles={"nmap": "quick"}))
+    assert stage.status == "failed" and len(calls) == 1 and "second scan" not in stage.error
+    calls.clear()
+    stage = run_stage_handler(hybrid.stage_port_scan, nmap_run("nmrev0000034", target="10.10.20.9"),
+                              {"deadline": time.monotonic() + 3})
+    assert stage.status == "failed" and len(calls) == 1 and "second scan" not in stage.error
 
 
 def test_host_timeout_note_shows_at_most_five_hosts(monkeypatch):
@@ -447,6 +529,39 @@ def test_web_stages_are_partial_when_urls_are_skipped_or_produce_nothing(monkeyp
         command=command, exit_code=1, stdout=maxtime, stderr="", duration_seconds=45))
     assert stage.status == "completed" and stage.partial is True and run.vulns == []
     assert "Host maximum execution time of 45 seconds reached" in stage.error
+
+    # Nikto 2.6.1 prints that line on its error output and only "Scan terminated" on its standard output (seen in
+    # the live tests of 20 November 2026, where such a URL was counted as "no results"). Both outputs are read.
+    limit_line = "+ ERROR: Host maximum execution time of 20 seconds reached\n"
+    ended = ("- Nikto v2.6.1\n" + header[header.index("+ Target IP"):] + "+ Server: SimpleHTTP/0.6 Python/3.14.7\n"
+             "+ No CGI Directories found (use '-C all' to force check all possible dirs). CGI tests skipped.\n"
+             "+ Scan terminated: 0 errors and 0 items reported on the remote host\n"
+             "+ End Time:           2026-11-20 18:05:25 (GMT3) (21 seconds)\n+ 1 host(s) tested\n")
+    run, stage = nikto_once("nmrev0000030", lambda command, timeout: CommandResult(
+        command=command, exit_code=0, stdout=ended, stderr=limit_line, duration_seconds=21))
+    assert stage.status == "completed" and stage.partial is True and run.vulns == []
+    assert stage.error == ("1 URL(s) were not examined completely, so findings may be missing: http://10.10.20.5: "
+                           "ERROR: Host maximum execution time of 20 seconds reached.")
+
+    def limit_with_empty_report(command, timeout):  # what Nikto 2.6.1 did in a live test of 20 November 2026
+        with open(report_path(command), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps([{"host": "10.10.20.5", "port": 80, "vulnerabilities": []}]))
+        return CommandResult(command=command, exit_code=0, stdout=ended, stderr=limit_line, duration_seconds=21)
+
+    run, stage = nikto_once("nmrev0000035", limit_with_empty_report)
+    assert stage.status == "completed" and stage.partial is True and run.vulns == []
+    assert stage.error.endswith("http://10.10.20.5: ERROR: Host maximum execution time of 20 seconds reached.")
+
+    def limit_with_report(command, timeout):
+        with open(report_path(command), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps([{"host": "10.10.20.5", "vulnerabilities": [{"msg": "Directory indexing found.",
+                                                                              "url": "/backup/"}]}]))
+        return CommandResult(command=command, exit_code=0, stderr=limit_line, duration_seconds=21,
+                             stdout=header + "+ Scan terminated: 0 errors and 1 items reported on the remote host\n")
+
+    run, stage = nikto_once("nmrev0000031", limit_with_report)
+    assert stage.status == "completed" and stage.partial is True and len(run.vulns) == 1
+    assert "Host maximum execution time of 20 seconds reached" in stage.error and "Scan terminated" not in stage.error
 
     # A budget that ran out before the first URL examined nothing: the stage fails instead of looking clean.
     run = web_run("nmrev0000021")
@@ -720,7 +835,8 @@ def test_an_interrupted_run_exports_failed_coverage_not_complete():
 def test_a_whatweb_probe_stopped_at_its_limit_or_unable_to_start_is_a_gap(monkeypatch):
     """A probe killed at its per-URL limit, or a WhatWeb process that could not start, examined nothing: the URL
     is recorded as unreachable (so Nikto skips it) but the stage is partial. Before the fix both counted as
-    "did not respond" and the run was labelled complete."""
+    "did not respond" and the run was labelled complete. With a profile of level 3 or 4, a probe stopped before
+    WhatWeb logged anything is "not probed" instead, and nothing is recorded for its URL."""
     def stopped(command, timeout):
         if command[-1].endswith(":8080"):
             return CommandResult(command=command, exit_code=None, stdout="", stderr="", duration_seconds=15,
@@ -735,7 +851,36 @@ def test_a_whatweb_probe_stopped_at_its_limit_or_unable_to_start_is_a_gap(monkey
                               {"web_ports": WEB_TARGETS, "deadline": time.monotonic() + 100}, stage_index=1)
     assert stage.status == "completed" and stage.partial is True
     assert "http://10.10.20.5:8080: timed out after 15s" in stage.error
+    assert "sends many requests" not in stage.error  # level 1 sends one request: no advice about the profile
     assert [w.reachable for w in run.web] == [True, False] and summarize(run).partial is True
+
+    # The same stop means something else for a profile that sends many requests per URL (levels 3 and 4): the
+    # probe was not finished, which says nothing about whether the URL answers. In the live tests of 20 November
+    # 2026 such URLs were recorded as unreachable, and Nikto was skipped as if the services were down.
+    run = web_run("nmrevww00007")
+    run.profiles = {"whatweb": "heavy"}
+    stage = run_stage_handler(hybrid.stage_web_fingerprint, run,
+                              {"web_ports": WEB_TARGETS, "deadline": time.monotonic() + 100}, stage_index=1)
+    assert stage.status == "completed" and stage.partial is True and [w.reachable for w in run.web] == [True]
+    assert stage.error == ("1 URL(s) could not be probed: http://10.10.20.5:8080: stopped at its 15s limit before "
+                           "the heavy probe finished. The heavy profile sends many requests per URL: give the run "
+                           "a larger time budget, run fewer tools with WhatWeb, or choose a lighter profile.")
+    assert "did not respond" not in stage.error and "timed out" not in stage.error
+
+    monkeypatch.setattr(hybrid, "run_command", lambda command, timeout: CommandResult(
+        command=command, exit_code=None, stdout="", stderr="", duration_seconds=15, timed_out=True))
+    run = web_run("nmrevww00008")
+    run.profiles = {"whatweb": "aggressive"}
+    unfinished = {"web_ports": WEB_TARGETS, "deadline": time.monotonic() + 100}
+    stage = run_stage_handler(hybrid.stage_web_fingerprint, run, unfinished, stage_index=1)
+    assert stage.status == "failed" and run.web == []
+    assert stage.error.startswith("WhatWeb could not probe any web service: http://10.10.20.5: stopped at its ")
+    assert stage.error.endswith("finished. The aggressive profile sends many requests per URL: give the run a larger "
+                                "time budget, run fewer tools with WhatWeb, or choose a lighter profile.")
+    assert stage.error.count("sends many requests per URL") == 1
+    stage = run_stage_handler(hybrid.stage_web_vuln_scan, run, unfinished, stage_index=2)
+    assert stage.status == "skipped"
+    assert stage.error == "WhatWeb could not probe any web service, so no URL is known to answer; nothing to scan."
 
     def answered_then_killed(command, timeout):
         write_whatweb_report(command)  # WhatWeb logged the response before the kill

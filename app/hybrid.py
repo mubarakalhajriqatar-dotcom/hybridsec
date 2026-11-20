@@ -69,6 +69,9 @@ MAX_WEB_TARGETS = 12
 # A URL is only started when at least this much time is left; a shorter probe would just time out.
 MIN_WHATWEB_SECONDS = 10.0
 MIN_NIKTO_SECONDS = 20.0
+# When version detection used up Nmap's host timeout, the ports are scanned once more without it, but only when at
+# least this much of the stage's share is left (see _rescan_without_versions).
+MIN_RESCAN_SECONDS = 5.0
 # Share of the run's time budget that each tool's stage receives (rescaled over the tools in the run).
 STAGE_TIME_WEIGHTS = {"nmap": 0.55, "whatweb": 0.2, "nikto": 0.25}
 # All the custom tools of a run share this one weight, so however many are ticked they take a bounded share (weight
@@ -574,7 +577,8 @@ def _run_nmap(manager: RunManager, run: Run, stage: StageResult, top_ports: int,
     host_timeout = max(5, int(timeout * 0.8))
     command = [binary, *profile.args, "--open", "--top-ports", str(top_ports),
                "--host-timeout", f"{host_timeout}s"]
-    if _scan_over_ipv6(run.target):
+    over_ipv6 = _scan_over_ipv6(run.target)
+    if over_ipv6:
         command.append("-6")
         if not is_ipv6_target(run.target):
             manager.add_log(run, f"nmap: {run.target} resolves to IPv6 addresses only, scanning with -6")
@@ -582,6 +586,7 @@ def _run_nmap(manager: RunManager, run: Run, stage: StageResult, top_ports: int,
     stage.command = " ".join(command)
     manager.add_log(run, f"nmap: {stage.command}")
 
+    started = time.monotonic()
     result = _start_tool(command, timeout=timeout + 5, context=context)
     stage.exit_code = result.exit_code
     stage.raw_output_chars = len(result.stdout)
@@ -598,10 +603,15 @@ def _run_nmap(manager: RunManager, run: Run, stage: StageResult, top_ports: int,
                     f"nmap could not resolve or reach '{run.target}' (0 hosts scanned).")
         return None
     if scan.timed_out_hosts and not scan.ports:
+        left = timeout - (time.monotonic() - started)
+        rescan, second = _rescan_without_versions(manager, run, stage, binary, profile, top_ports, over_ipv6, left,
+                                                  timeout, host_timeout, scan.timed_out_hosts, context)
+        if rescan is not None:
+            return rescan
         _stop_stage(manager, run, stage, "failed",
                     f"nmap gave up on {_host_list(scan.timed_out_hosts)} after {host_timeout}s (host timeout) "
                     "without finding an open port. Increase the time budget or reduce top_ports; the host may "
-                    "be slow or heavily filtered.")
+                    "be slow or heavily filtered." + second)
         return None
     if (result.timed_out or scan.truncated) and not scan.ports and scan.hosts_up == 0:
         # Nmap was stopped (or its XML cut off) before it finished a single host, so there is no evidence
@@ -622,6 +632,64 @@ def _run_nmap(manager: RunManager, run: Run, stage: StageResult, top_ports: int,
     manager.add_log(run, f"nmap: {scan.hosts_up} host(s) up, {len(scan.ports)} open port(s)"
                          + (" (partial)" if stage.partial else ""))
     return scan
+
+
+def _rescan_without_versions(manager: RunManager, run: Run, stage: StageResult, binary: str, profile: ToolProfile,
+                             top_ports: int, over_ipv6: bool, left: float, stage_timeout: float,
+                             host_timeout: int, gave_up_on: list[str],
+                             context: StageContext | None) -> tuple[parsers.NmapResult | None, str]:
+    """Scan the ports once more without version detection, after the first scan ran into Nmap's host timeout.
+
+    Nmap reports no port at all for a host that reaches --host-timeout, so a single service that answers the
+    version probes very slowly hides every open port of its host (seen in the live tests of 20 November 2026).
+    The second scan keeps the profile's other options, its timing among them, and leaves out -sV and -sC. It is
+    tried only when the profile asked for version detection and at least MIN_RESCAN_SECONDS are left of the
+    stage's share and before the run's deadline.
+
+    Returns (the second scan, "") when it found open ports: the stage is then completed and partial, and its
+    note says that products and versions are missing. Otherwise returns (None, sentence): the sentence to add to
+    the stage's failure note says what the second scan gave, and is "" when it was not tried or could not start.
+    """
+    plain = [arg for arg in profile.args if arg not in ("-sV", "-sC")]
+    left = min(left, _remaining(context or {}))
+    if len(plain) == len(profile.args) or left < MIN_RESCAN_SECONDS:
+        return None, ""
+    left_out = "version detection and default scripts" if "-sC" in profile.args else "version detection"
+    second_timeout = max(5, int(left * 0.8))
+    command = [binary, *plain, "--open", "--top-ports", str(top_ports), "--host-timeout", f"{second_timeout}s"]
+    if over_ipv6:
+        command.append("-6")
+    command += ["-oX", "-", run.target]
+    hosts = _host_list(gave_up_on)
+    manager.add_log(run, f"nmap: {hosts} hit the {host_timeout}s host timeout with no open port reported; "
+                         f"scanning the ports again without {left_out}")
+    stage.command += "\n" + " ".join(command)
+    manager.add_log(run, f"nmap: {' '.join(command)}")
+    result = _start_tool(command, timeout=left + 5, context=context)
+    if result.exit_code == START_FAILED_EXIT_CODE:
+        # It could not start, or the server is shutting down: no second scan was made.
+        manager.add_log(run, f"nmap: the second scan did not run: {result.stderr}")
+        return None, ""
+    stage.raw_output_chars += len(result.stdout)
+    scan = parsers.parse_nmap_xml_full(result.stdout)
+    if not scan.ports:
+        if result.timed_out or scan.timed_out_hosts or result.exit_code not in (0, None):
+            return None, (f" A second scan without {left_out} did not finish either (its host timeout was "
+                          f"{second_timeout}s), so it gives no answer about the ports.")
+        return None, f" A second scan without {left_out} found no open port either."
+    stage.exit_code = result.exit_code
+    notes = [f"nmap gave up on {hosts} after {host_timeout}s (host timeout), so the ports were scanned again without "
+             f"{left_out}: no product or version is shown, and the service names are Nmap's defaults for the port "
+             "numbers, so a web service on an unusual port may not reach the web stages."]
+    notes += _nmap_caveats(result, scan, stage_timeout, second_timeout)
+    if "Increase the time budget or reduce top_ports." not in notes:
+        notes.append("Increase the time budget or reduce top_ports.")
+    stage.partial = True
+    stage.error = " ".join(notes)
+    manager.add_log(run, stage.error)
+    stage.status = "completed"
+    manager.add_log(run, f"nmap: {scan.hosts_up} host(s) up, {len(scan.ports)} open port(s) (partial)")
+    return scan, ""
 
 
 def _nmap_caveats(result: CommandResult, scan: parsers.NmapResult, timeout: float, host_timeout: int) -> list[str]:
@@ -747,6 +815,8 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
     not_probed: list[str] = []  # URLs whose probe could not start or was stopped before any answer
     skipped = 0
     gaps = 0  # URLs WhatWeb did not fully examine: killed at the per-URL limit, or the process could not start
+    unfinished = 0  # of those: probes of level 3 or 4 that were stopped before WhatWeb had logged anything
+    many_requests = _whatweb_sends_many_requests(profile)
     stage_end = _stage_end(context, timeout)
     for index, port in enumerate(targets):
         url = parsers.url_for(port, _probe_host(run))
@@ -764,13 +834,22 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
         finding = parsers.parse_whatweb_json(_read_and_remove(path), url, parsers.host_address(port.host),
                                              port.port)
         if result.timed_out:
-            # WhatWeb logs a URL as soon as it answers, so a probe killed at its limit may already have
-            # recorded the response: that URL is reachable, but its fingerprint may be incomplete.
+            # A probe killed at its limit may already have logged the response: that URL is reachable, but its
+            # fingerprint may be incomplete. With nothing logged, the single request of level 1 got no answer in
+            # time. A probe of level 3 or 4 sends many requests and may simply not have finished (in the live
+            # tests of 20 November 2026 a level 4 probe of one site needed 440 s, and none of the six level 4
+            # probes stopped at 20 s or 60 s had logged anything): that says nothing about whether the URL
+            # answers, so the URL counts as not probed.
+            gaps += 1
             if finding.reachable:
                 cut_short.append(f"{url}: probe stopped at its {int(per_url)}s limit after a response")
+            elif many_requests:
+                unfinished += 1
+                not_probed.append(f"{url}: stopped at its {int(per_url)}s limit before the {profile.key} probe "
+                                  "finished")
+                continue
             else:
                 failures.append(f"{url}: timed out after {int(per_url)}s")
-            gaps += 1
         elif result.exit_code == START_FAILED_EXIT_CODE:
             # WhatWeb could not start, or the server's shutdown stopped it: no complete probe was made, so
             # this says nothing about whether the URL answers (it is a gap, not a result).
@@ -793,7 +872,7 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
     elif (findings or not_probed) and reachable == 0:
         # Every URL that was probed gave no answer. When some were not probed (could not start, or the budget
         # ran out), the reason says so: those URLs prove nothing, and _highlights() reads the difference.
-        not_examined = (["not probed: " + "; ".join(not_probed)[:200]] if not_probed else []) + \
+        not_examined = (["not probed: " + "; ".join(not_probed)[:400]] if not_probed else []) + \
                        ([f"{skipped} URL(s) skipped because the time budget ran out"] if skipped else [])
         if failures and not_examined:
             reason = f"{WHATWEB_NO_RESPONSE} it probed: " + "; ".join(failures)[:400] + "; " + "; ".join(not_examined)
@@ -803,6 +882,8 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
             reason = "WhatWeb could not probe any web service: " + "; ".join(not_probed)[:600]
             if skipped:
                 reason += f"; {skipped} URL(s) skipped because the time budget ran out"
+        if unfinished:
+            reason += ". " + _whatweb_profile_advice(profile)
         _stop_stage(manager, run, stage, "failed", reason)
     else:
         stage.status = "completed"
@@ -816,6 +897,8 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
                          "fingerprint may be incomplete: " + "; ".join(cut_short)[:400])
         if skipped:
             notes.append(f"{skipped} URL(s) skipped because the time budget ran out.")
+        if unfinished:
+            notes.append(_whatweb_profile_advice(profile))
         stage.error = join_notes(notes)
         # A URL that gave no HTTP response is a result (recorded as unreachable). A URL that could not be probed
         # fully, or at all, is a gap, like the URLs skipped when the budget ran out.
@@ -823,6 +906,17 @@ def _run_whatweb(manager: RunManager, run: Run, stage: StageResult, context: Sta
         manager.add_log(run, f"whatweb: {sum(len(f.technologies) for f in findings)} technologies across "
                              f"{reachable} reachable URL(s)")
     return findings
+
+
+def _whatweb_sends_many_requests(profile: ToolProfile) -> bool:
+    """True for WhatWeb's aggression levels 3 and 4, whose probes send further requests after the first one."""
+    return "-a" in profile.args and profile.args[profile.args.index("-a") + 1] != "1"
+
+
+def _whatweb_profile_advice(profile: ToolProfile) -> str:
+    """What to do when a probe of level 3 or 4 was stopped before it finished."""
+    return (f"The {profile.key} profile sends many requests per URL: give the run a larger time budget, run fewer "
+            "tools with WhatWeb, or choose a lighter profile.")
 
 
 # --- Stage 3: web vulnerability scan (Nikto) ------------------------------------------------------
@@ -928,15 +1022,20 @@ def _run_nikto(manager: RunManager, run: Run, stage: StageResult, context: Stage
         # A Nikto killed at its time limit examined only part of the URL, and Nikto prints why it stopped
         # early (too many errors, its -maxtime, no web server) even when it also wrote a report: such a URL is
         # never recorded as examined and clean. Its findings are kept, and the stage is marked partial.
+        # Nikto 2.6.1 printed its "+ ERROR: Host maximum execution time ..." line on the error output and only
+        # "+ Scan terminated: ..." on the standard output (seen in the live tests of 20 November 2026); other
+        # ERROR lines may go either way. Both outputs are read, the error output first, so that the reason
+        # names the limit or the error.
+        status_lines = f"{result.stderr}\n{result.stdout}"
         if result.timed_out:
             stopped: str | None = f"stopped at its {int(per_url)}s time limit"
         else:
-            stopped = parsers.nikto_stopped_early(result.stdout)
+            stopped = parsers.nikto_stopped_early(status_lines)
             if stopped is None and not is_json and not found:
                 stopped = parsers.nikto_text_problem(result.stdout)  # the banner alone
         if stopped is None:
             successes += 1
-        elif found or parsers.nikto_reached_maxtime(result.stdout):
+        elif found or parsers.nikto_reached_maxtime(status_lines):
             # Findings were reported, or Nikto ran its tests until its own -maxtime: the URL was examined,
             # only not completely.
             successes += 1

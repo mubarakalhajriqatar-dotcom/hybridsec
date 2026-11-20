@@ -115,7 +115,10 @@ TOOLS: dict[str, ToolSpec] = {
                         "product and pin down its version.", ("-a", "3")),
             ToolProfile("heavy", "Heavy, level 4",
                         "Every plugin's extra requests are tried on every URL: the most complete fingerprint, "
-                        "at the cost of many requests per URL.", ("-a", "4")),
+                        "at the cost of many requests per URL. One URL can take several minutes, and when "
+                        "Nmap, WhatWeb and Nikto all run, WhatWeb gets a fifth of the time budget (less with "
+                        "custom tools), shared between the URLs: give the run a large budget or run fewer tools "
+                        "with WhatWeb.", ("-a", "4")),
         ),
     ),
     "nikto": ToolSpec(
