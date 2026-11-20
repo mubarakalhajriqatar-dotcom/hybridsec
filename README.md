@@ -322,7 +322,7 @@ simulated run and a report download, without touching your database or `.env`:
 |---|---|
 | `docs/ARCHITECTURE.md` | Plain-language guide to every backend module, the request flow, the pipeline and the design decisions |
 | `docs/DASHBOARD.md` | How the dashboard is organised, routing, polling, settings saving, accessibility |
-| `docs/TESTING_GUIDE.md` | Install, automated checks, a 27-item manual checklist and how to report a bug |
+| `docs/TESTING_GUIDE.md` | Install, automated checks, a 28-item manual checklist and how to report a bug |
 | `docs/screenshots/` | Two dashboard screenshots from simulation mode: the overview and a finished run |
 
 ---

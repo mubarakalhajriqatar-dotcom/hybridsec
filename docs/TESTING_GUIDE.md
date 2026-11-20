@@ -73,9 +73,19 @@ Tick each box and note anything unexpected. "Simulation" means the Simulation sw
 ### Live runs (only with the scanners installed, only against systems you own)
 - [ ] L-01 Nmap only against `127.0.0.1`: the port scan completes and lists real open ports.
 - [ ] L-02 Nmap and WhatWeb: web services found by Nmap are fingerprinted (run a local web server first if none is running).
-- [ ] L-03 Full pipeline with the default budget: Nikto findings appear with severities.
-- [ ] L-04 Full pipeline with a 60 second budget: Nikto still receives at least its 20 second minimum and scans at least one URL.
-- [ ] L-05 Target `nohost.invalid`: the Nmap stage fails with "could not resolve" and the run is marked failed.
+- [ ] L-03 Full pipeline with a 180 second budget: Nikto findings appear with severities.
+- [ ] L-04 Full pipeline with a 60 second budget: Nikto still receives at least its 20 second minimum and scans at least one URL, provided WhatWeb finishes within its part of the budget.
+- [ ] L-05 An address where nothing listens, for example `127.0.0.2` (bind the web server of L-02 to `127.0.0.1` only, because on Linux and Windows a server that listens on all addresses also answers on `127.0.0.2`): no open ports, or the port scan fails with a host timeout; in both cases WhatWeb and Nikto are skipped.
+- [ ] L-06 Target `nohost.invalid`: the Nmap stage fails with "could not resolve" and the run is marked failed.
+
+These six tests were run once each on 20 November 2026 by Claude Code, an AI coding tool, at the request of
+the project lead, in Kali Linux under WSL 2 on the development PC. The target of L-01 to L-04 was one small
+static website written for the test, served by `python3 -m http.server` bound to `127.0.0.1` only; the
+scans found one open port. The runs were started through the API, not from the dashboard; the AI planner
+took no part, and the tools ran with their default profiles. All six gave the expected outcome. No scanner
+came near the part of the time budget it was given, so stopping a scanner at its time limit, skipping URLs
+when time runs out and partial stages are still covered only by the automated tests.
+The records are kept in the project's own archive, which is not part of this repository.
 
 ## 4. How to report a bug
 
